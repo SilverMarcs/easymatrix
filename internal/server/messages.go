@@ -512,7 +512,7 @@ func (s *Server) loadReactionMap(ctx context.Context, roomID id.RoomID, events [
 }
 
 func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, room *database.Room, lookup *accountLookup, reactions reactionBundle) (compat.Message, error) {
-	if evt == nil || evt.RedactedBy != "" {
+	if evt == nil {
 		return compat.Message{}, errSkipEvent
 	}
 	evtType := evt.GetType().Type
@@ -558,6 +558,12 @@ func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, roo
 	}
 	if replyTo := evt.GetReplyTo(); replyTo != "" {
 		message.LinkedMessageID = string(replyTo)
+	}
+
+	if evt.RedactedBy != "" {
+		message.Type = compat.MessageType("TEXT")
+		message.Text = ""
+		return message, nil
 	}
 
 	switch evtType {
