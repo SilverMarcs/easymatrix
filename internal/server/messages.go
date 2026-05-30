@@ -773,3 +773,25 @@ func messageTypeFromAttachment(mimeType, hint string) event.MessageType {
 	}
 	return event.MsgFile
 }
+
+func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) error {
+	chatID := readChatID(r, "")
+	if chatID == "" {
+		return errs.Validation(map[string]any{"chatID": "chatID is required"})
+	}
+	messageID := readMessageID(r, "")
+	if messageID == "" {
+		return errs.Validation(map[string]any{"messageID": "messageID is required"})
+	}
+
+	cli := s.rt.Client()
+	roomID := id.RoomID(chatID)
+	eventID := id.EventID(messageID)
+
+	_, err := cli.Client.RedactEvent(r.Context(), roomID, eventID, mautrix.ReqRedact{})
+	if err != nil {
+		return errs.Internal(fmt.Errorf("failed to redact event: %w", err))
+	}
+
+	return writeJSON(w, map[string]any{"success": true})
+}

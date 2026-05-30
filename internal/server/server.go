@@ -108,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "PUT /v1/chats/{chatID}/messages/{messageID}", s.editMessage, false, "write")
 	s.handle(mux, "POST /v1/chats/{chatID}/messages/{messageID}/reactions", s.addReaction, false, "write")
 	s.handle(mux, "DELETE /v1/chats/{chatID}/messages/{messageID}/reactions", s.removeReaction, false, "write")
+	s.handle(mux, "DELETE /v1/chats/{chatID}/messages/{messageID}", s.deleteMessage, false, "write")
 	s.handle(mux, "GET /v1/messages/search", s.searchMessages, false, "read")
 	s.handle(mux, "GET /v1/ws", s.wsEvents, true, "read")
 
