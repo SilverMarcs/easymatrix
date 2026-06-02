@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/batuhan/easymatrix/internal/config"
 	"github.com/batuhan/easymatrix/internal/gomuksruntime"
@@ -61,6 +64,7 @@ type Config struct {
 	ListenAddr          string `json:"listenAddr,omitempty"`
 	AccessToken         string `json:"accessToken,omitempty"`
 	StateDir            string `json:"stateDir,omitempty"`
+	ManageSecret        string `json:"manageSecret,omitempty"`
 	AllowQueryTokenAuth bool   `json:"allowQueryTokenAuth,omitempty"`
 	BeeperHomeserverURL string `json:"beeperHomeserverUrl,omitempty"`
 	BeeperLoginToken    string `json:"beeperLoginToken,omitempty"`
@@ -75,8 +79,9 @@ type Runtime struct {
 	server  *server.Server
 	handler http.Handler
 
-	mu      sync.Mutex
-	started bool
+	mu         sync.Mutex
+	started    bool
+	httpServer *http.Server
 }
 
 func New(cfg Config) (*Runtime, error) {
@@ -110,10 +115,59 @@ func (r *Runtime) Start(ctx context.Context) error {
 	return nil
 }
 
+// Serve starts the runtime and exposes its HTTP handler (including the
+// /v1/ws realtime endpoint) on a real TCP listener. This is how the iOS and
+// macOS apps run the backend in-process: a localhost socket inside the app,
+// which the Swift networking layer talks to exactly as it would a standalone
+// server. Listening on a socket is permitted on iOS — only spawning
+// subprocesses is not. Blocks until the listener is established, then serves
+// in the background; returns any bind error.
+func (r *Runtime) Serve(ctx context.Context, listenAddr string) error {
+	if err := r.Start(ctx); err != nil {
+		return err
+	}
+	if strings.TrimSpace(listenAddr) == "" {
+		listenAddr = r.cfg.ListenAddr
+	}
+
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", listenAddr, err)
+	}
+
+	srv := &http.Server{Handler: r.handler}
+	r.mu.Lock()
+	r.httpServer = srv
+	r.mu.Unlock()
+
+	go func() {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			// Best effort: the listener died; mark the runtime stopped so the
+			// app's readiness probe fails and surfaces a crash state.
+			r.mu.Lock()
+			r.started = false
+			r.mu.Unlock()
+		}
+	}()
+	return nil
+}
+
 func (r *Runtime) Stop() {
 	r.mu.Lock()
+	srv := r.httpServer
+	r.httpServer = nil
+	started := r.started
+	r.mu.Unlock()
+
+	if srv != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}
+
+	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.started {
+	if !started {
 		return
 	}
 	r.rt.Stop()
@@ -251,6 +305,9 @@ func normalizeConfig(input Config) (config.Config, error) {
 	}
 	if strings.TrimSpace(input.StateDir) != "" {
 		cfg.StateDir = input.StateDir
+	}
+	if strings.TrimSpace(input.ManageSecret) != "" {
+		cfg.ManageSecret = input.ManageSecret
 	}
 	cfg.AllowQueryTokenAuth = input.AllowQueryTokenAuth
 	if strings.TrimSpace(input.BeeperHomeserverURL) != "" {
