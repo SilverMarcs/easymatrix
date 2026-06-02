@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime/cgo"
 	"sync"
 	"unsafe"
@@ -80,6 +82,12 @@ func EasyMatrixCreate(cfgJSON *C.char) C.EasyMatrixHandle {
 		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 			return 0
 		}
+	}
+	if cfg.StateDir != "" {
+		_ = os.Setenv("GOMUKS_ROOT", cfg.StateDir)
+		_ = os.Setenv("DEBUG_DIR", filepath.Join(cfg.StateDir, "logs"))
+		_ = os.Setenv("GOMUKS_LOGS_HOME", filepath.Join(cfg.StateDir, "logs"))
+		_ = os.Chdir(cfg.StateDir)
 	}
 	rt, err := embedded.New(cfg)
 	if err != nil {
