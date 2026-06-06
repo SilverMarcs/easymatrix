@@ -408,6 +408,18 @@ func (s *Server) hydrateMessagesForWSEvent(chatID string, messageIDs []string) (
 		if getErr != nil || evt == nil || evt.RoomID != roomID {
 			continue
 		}
+		// 2026-06-06: GetByID's SQL hardcodes timeline_rowid as -1, so every
+		// hydrated message got sortKey "-1" and the client sorted it to the
+		// top of the timeline until the next full reload (sends never
+		// scrolled to bottom). Resolve the real timeline rowid; if the event
+		// isn't in the timeline yet, zero it so messageSortKey falls back to
+		// RowID/timestamp instead of trusting the -1 placeholder.
+		var timelineRowID int64
+		if scanErr := cli.DB.QueryRow(context.Background(), timelineRowIDForEventQuery, roomID, evt.ID).Scan(&timelineRowID); scanErr == nil && timelineRowID != 0 {
+			evt.TimelineRowID = database.TimelineRowID(timelineRowID)
+		} else {
+			evt.TimelineRowID = 0
+		}
 		events = append(events, evt)
 	}
 	if len(events) == 0 {
