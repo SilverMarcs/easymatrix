@@ -297,6 +297,15 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 				entries = []compatRecord{hydrated}
 			}
 		}
+		if domainEvent.Type == wsDomainTypeChatUpserted {
+			// Hydrate the chat summary so clients patch a single sidebar row
+			// instead of refetching the whole chat list. On any failure we send
+			// the event bare (no entries); the client then falls back to a list
+			// refresh, so correctness is preserved.
+			if hydrated, err := h.server.hydrateChatForWSEvent(domainEvent.ChatID); err == nil && hydrated != nil {
+				entries = []compatRecord{hydrated}
+			}
+		}
 
 		now := time.Now().UTC()
 		if h.dropDuplicate(domainEvent, entries, now) {
@@ -455,6 +464,37 @@ func (s *Server) hydrateMessagesForWSEvent(chatID string, messageIDs []string) (
 		}
 	}
 	return output, nil
+}
+
+// hydrateChatForWSEvent builds the same chat summary the list endpoint returns
+// for a single room, so a chat.upserted event carries enough for the client to
+// patch one sidebar row (preview, unread, ordering, flags) instead of refetching
+// the entire chat list on every event. Mirrors getChat's single-chat path.
+func (s *Server) hydrateChatForWSEvent(chatID string) (compatRecord, error) {
+	cli := s.rt.Client()
+	if cli == nil {
+		return nil, nil
+	}
+	ctx := context.Background()
+	roomID := id.RoomID(chatID)
+	room, err := cli.DB.Room.Get(ctx, roomID)
+	if err != nil || room == nil {
+		return nil, err
+	}
+	lookup, err := s.buildAccountLookup(ctx)
+	if err != nil {
+		return nil, err
+	}
+	roomStates, err := s.loadRoomAccountDataStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lastReadKey := s.loadLastReadSortKey(ctx, roomID)
+	chat, err := s.mapRoomToChat(ctx, room, lookup, chatPreviewParticipants, true, roomStates[roomID], lastReadKey)
+	if err != nil {
+		return nil, err
+	}
+	return toCompatRecord(chat)
 }
 
 func (s *Server) hydrateReceiptForWSEvent(chatID string) (compatRecord, error) {
