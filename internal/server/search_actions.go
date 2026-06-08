@@ -1188,6 +1188,10 @@ func (s *Server) searchChatsCore(ctx context.Context, params searchChatsParams) 
 				if !state.EffectiveArchived() {
 					continue
 				}
+			case "unread":
+				if room.UnreadMessages <= 0 && !state.IsMarkedUnread {
+					continue
+				}
 			}
 		}
 

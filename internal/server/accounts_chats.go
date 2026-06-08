@@ -294,6 +294,8 @@ func (s *Server) listChats(w http.ResponseWriter, r *http.Request) error {
 	}
 	readKeys, _ := s.loadLastReadSortKeys(r.Context())
 
+	inbox := strings.TrimSpace(r.URL.Query().Get("inbox"))
+
 	items := make([]compat.Chat, 0, chatPageSize+1)
 	for _, room := range rooms {
 		if cursorValue != nil {
@@ -304,7 +306,28 @@ func (s *Server) listChats(w http.ResponseWriter, r *http.Request) error {
 				continue
 			}
 		}
-		chat, mapErr := s.mapRoomToChat(r.Context(), room, lookup, chatPreviewParticipants, true, roomStates[room.ID], readKeys[room.ID])
+		state := roomStates[room.ID]
+		if inbox != "" {
+			switch inbox {
+			case "primary":
+				if state.EffectiveArchived() || state.IsLowPriority {
+					continue
+				}
+			case "low-priority":
+				if !state.IsLowPriority {
+					continue
+				}
+			case "archive":
+				if !state.EffectiveArchived() {
+					continue
+				}
+			case "unread":
+				if room.UnreadMessages <= 0 && !state.IsMarkedUnread {
+					continue
+				}
+			}
+		}
+		chat, mapErr := s.mapRoomToChat(r.Context(), room, lookup, chatPreviewParticipants, true, state, readKeys[room.ID])
 		if mapErr != nil {
 			continue
 		}
