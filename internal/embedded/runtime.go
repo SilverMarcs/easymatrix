@@ -126,6 +126,43 @@ func (r *Runtime) Serve(ctx context.Context, listenAddr string) error {
 	if err := r.Start(ctx); err != nil {
 		return err
 	}
+	return r.listenAndServe(listenAddr)
+}
+
+// Rebind recovers the HTTP listener after the OS reaped the process's sockets
+// during suspension, WITHOUT tearing down the Matrix client, database, or
+// crypto store. Those live in process memory and survive suspension untouched;
+// only the sockets die. The old foreground-recovery path did a full Stop+Serve
+// (a 5s graceful-shutdown ceiling, DB close/reopen, crypto reload, and a
+// synchronous homeserver /versions round-trip) just to replace a dead socket,
+// which stalled the app's UI for seconds on every return to the foreground.
+// Here we hard-close the defunct server and bind a fresh listener onto the
+// still-live handler; the sync loop reconnects its own outbound connection on
+// its own. Start is a no-op when the client is already in memory, so this is
+// near-instant.
+func (r *Runtime) Rebind(ctx context.Context, listenAddr string) error {
+	if err := r.Start(ctx); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	old := r.httpServer
+	r.httpServer = nil
+	r.mu.Unlock()
+	if old != nil {
+		// Close(), not Shutdown(): the old socket is already dead, there is
+		// nothing live to drain, and Close makes the old Serve goroutine return
+		// http.ErrServerClosed so it won't race us and flip r.started to false.
+		_ = old.Close()
+	}
+
+	return r.listenAndServe(listenAddr)
+}
+
+// listenAndServe binds a fresh TCP listener on listenAddr and serves r.handler
+// on it in a background goroutine. Callers run Start first (Start is what owns
+// r.started); this only owns the socket half of the lifecycle.
+func (r *Runtime) listenAndServe(listenAddr string) error {
 	if strings.TrimSpace(listenAddr) == "" {
 		listenAddr = r.cfg.ListenAddr
 	}

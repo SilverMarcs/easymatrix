@@ -142,6 +142,16 @@ func EasyMatrixServe(handle C.EasyMatrixHandle, listenAddr *C.char) C.int {
 	return 0
 }
 
+//export EasyMatrixResume
+func EasyMatrixResume(handle C.EasyMatrixHandle, listenAddr *C.char) C.int {
+	rt := runtimeFromHandle(handle)
+	if err := rt.runtime.Rebind(context.Background(), goString(listenAddr)); err != nil {
+		setLastError(fmt.Errorf("resume: %w", err))
+		return 1
+	}
+	return 0
+}
+
 //export EasyMatrixStop
 func EasyMatrixStop(handle C.EasyMatrixHandle) {
 	runtimeFromHandle(handle).runtime.Stop()
