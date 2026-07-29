@@ -318,6 +318,7 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 		}
 
 		if wantsPush && len(entries) > 0 {
+			h.server.addPushChatContext(domainEvent.ChatID, entries)
 			h.server.push.enqueueMessages(entries)
 		}
 
@@ -338,6 +339,24 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 			}
 			h.write(target, payload)
 		}
+	}
+}
+
+func (s *Server) addPushChatContext(chatID string, entries []compatRecord) {
+	cli := s.rt.Client()
+	if cli == nil {
+		return
+	}
+	room, err := cli.DB.Room.Get(context.Background(), id.RoomID(chatID))
+	if err != nil || room == nil {
+		return
+	}
+
+	title := strings.TrimSpace(ptrString(room.Name))
+	isGroupChat := room.DMUserID == nil || strings.TrimSpace(string(*room.DMUserID)) == ""
+	for _, entry := range entries {
+		entry["chatTitle"] = title
+		entry["isGroupChat"] = isGroupChat
 	}
 }
 

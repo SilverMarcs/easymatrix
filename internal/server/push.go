@@ -166,34 +166,9 @@ func (p *pushService) notifyMessages(entries []compatRecord) {
 		return
 	}
 	for _, entry := range entries {
-		if isSender, _ := entry["isSender"].(bool); isSender {
+		payload, shouldSend := makePushPayload(entry)
+		if !shouldSend {
 			continue
-		}
-		messageType, _ := entry["type"].(string)
-		if messageType == "REACTION" || messageType == "MEMBER_JOIN" || messageType == "MEMBER_INVITE" {
-			continue
-		}
-
-		messageID, _ := entry["id"].(string)
-		chatID, _ := entry["chatID"].(string)
-		senderName, _ := entry["senderName"].(string)
-		body, _ := entry["text"].(string)
-		if strings.TrimSpace(body) == "" {
-			body = "Sent an attachment"
-		}
-		if strings.TrimSpace(senderName) == "" {
-			senderName = "Relay"
-		}
-
-		payload := map[string]any{
-			"aps": map[string]any{
-				"alert":     map[string]string{"title": senderName, "body": body},
-				"sound":     "default",
-				"thread-id": chatID,
-				"category":  "MESSAGE",
-			},
-			"chatID":    chatID,
-			"messageID": messageID,
 		}
 		for _, token := range p.tokens() {
 			if err := p.provider.send(token, payload); err != nil {
@@ -201,6 +176,45 @@ func (p *pushService) notifyMessages(entries []compatRecord) {
 			}
 		}
 	}
+}
+
+func makePushPayload(entry compatRecord) (map[string]any, bool) {
+	if isSender, _ := entry["isSender"].(bool); isSender {
+		return nil, false
+	}
+	messageType, _ := entry["type"].(string)
+	if messageType == "REACTION" || messageType == "MEMBER_JOIN" || messageType == "MEMBER_INVITE" {
+		return nil, false
+	}
+
+	messageID, _ := entry["id"].(string)
+	chatID, _ := entry["chatID"].(string)
+	senderName, _ := entry["senderName"].(string)
+	body, _ := entry["text"].(string)
+	chatTitle, _ := entry["chatTitle"].(string)
+	isGroupChat, _ := entry["isGroupChat"].(bool)
+	if strings.TrimSpace(body) == "" {
+		body = "Sent an attachment"
+	}
+	if strings.TrimSpace(senderName) == "" {
+		senderName = "Relay"
+	}
+
+	alert := map[string]string{"title": senderName, "body": body}
+	if isGroupChat && strings.TrimSpace(chatTitle) != "" {
+		alert["title"] = chatTitle
+		alert["subtitle"] = senderName
+	}
+	return map[string]any{
+		"aps": map[string]any{
+			"alert":     alert,
+			"sound":     "default",
+			"thread-id": chatID,
+			"category":  "MESSAGE",
+		},
+		"chatID":    chatID,
+		"messageID": messageID,
+	}, true
 }
 
 func (s *Server) registerPushDevice(w http.ResponseWriter, r *http.Request) error {
