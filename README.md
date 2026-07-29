@@ -65,6 +65,16 @@ Once running:
 - `MATRIX_USERNAME`: username for password login
 - `MATRIX_PASSWORD`: password for password login
 - `MATRIX_RECOVERY_KEY`: recovery key / passphrase for verification
+- `APNS_KEY_PATH`: path to an APNs `.p8` provider key (optional; enables push delivery)
+- `APNS_KEY_ID`: Apple push key identifier
+- `APNS_TEAM_ID`: Apple Developer team identifier
+- `APNS_TOPIC`: the app bundle ID, for example `com.SilverMarcs.SwiftBeeper`
+- `APNS_ENVIRONMENT`: `sandbox` (default) or `production`
+
+When APNs is configured, authenticated clients can register device tokens with
+`POST /v1/push/devices`. Registrations are persisted inside the gomuks state
+directory. WebSockets remain the foreground live-update transport; APNs handles
+alerts while Apple platforms suspend the app.
 
 gomuks-compatible overrides:
 

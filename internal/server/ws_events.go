@@ -133,9 +133,8 @@ type wsHub struct {
 	clients      map[uint64]*wsClient
 	nextClientID uint64
 
-	subscribeOnce sync.Once
-	subscribeErr  error
-	unsubscribe   func()
+	subscribeMu sync.Mutex
+	unsubscribe func()
 
 	eventQueue chan any
 
@@ -154,30 +153,33 @@ func newWSHub(server *Server) *wsHub {
 }
 
 func (h *wsHub) ensureSubscription() error {
-	h.subscribeOnce.Do(func() {
-		buffer := h.server.rt.EventBuffer()
-		if buffer == nil {
-			h.subscribeErr = errors.New("gomuks runtime is not started")
+	h.subscribeMu.Lock()
+	defer h.subscribeMu.Unlock()
+	if h.unsubscribe != nil {
+		return nil
+	}
+
+	buffer := h.server.rt.EventBuffer()
+	if buffer == nil {
+		return errors.New("gomuks runtime is not started")
+	}
+	listenerID, _ := buffer.Subscribe(0, nil, func(evt *gomuks.BufferedEvent) {
+		if evt == nil {
 			return
 		}
-		listenerID, _ := buffer.Subscribe(0, nil, func(evt *gomuks.BufferedEvent) {
-			if evt == nil {
-				return
-			}
-			select {
-			case h.eventQueue <- evt.Data:
-			default:
-				// Drop overflowing events to avoid blocking gomuks sync pipeline.
-			}
-		})
-		h.unsubscribe = func() {
-			if currentBuffer := h.server.rt.EventBuffer(); currentBuffer != nil {
-				currentBuffer.Unsubscribe(listenerID)
-			}
+		select {
+		case h.eventQueue <- evt.Data:
+		default:
+			// Drop overflowing events to avoid blocking gomuks sync pipeline.
 		}
-		go h.run()
 	})
-	return h.subscribeErr
+	h.unsubscribe = func() {
+		if currentBuffer := h.server.rt.EventBuffer(); currentBuffer != nil {
+			currentBuffer.Unsubscribe(listenerID)
+		}
+	}
+	go h.run()
+	return nil
 }
 
 func (h *wsHub) run() {
@@ -279,7 +281,10 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 	domainEvents := mapSyncCompleteToDomainEvents(syncComplete)
 	for _, domainEvent := range domainEvents {
 		targets := h.subscribedTargets(domainEvent.ChatID)
-		if len(targets) == 0 {
+		wantsPush := domainEvent.Type == wsDomainTypeMessageUpserted &&
+			len(targets) == 0 &&
+			h.server.push.canSend()
+		if len(targets) == 0 && !wantsPush {
 			continue
 		}
 
@@ -310,6 +315,10 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 		now := time.Now().UTC()
 		if h.dropDuplicate(domainEvent, entries, now) {
 			continue
+		}
+
+		if wantsPush && len(entries) > 0 {
+			h.server.push.enqueueMessages(entries)
 		}
 
 		for _, target := range targets {
