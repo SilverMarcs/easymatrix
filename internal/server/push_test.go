@@ -1,9 +1,13 @@
 package server
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"go.mau.fi/gomuks/pkg/hicli/database"
+	"maunium.net/go/mautrix/event"
 )
 
 func TestPushRegistrationsPersist(t *testing.T) {
@@ -87,5 +91,43 @@ func TestDirectPushPayloadOmitsSubtitle(t *testing.T) {
 	}
 	if _, exists := alert["subtitle"]; exists {
 		t.Fatal("direct message payload should not include a subtitle")
+	}
+}
+
+func TestRoomAccountDataAllowsPushHonorsMuteState(t *testing.T) {
+	tests := []struct {
+		name       string
+		mutedUntil int64
+		want       bool
+	}{
+		{name: "unmuted", mutedUntil: 0, want: true},
+		{name: "muted forever", mutedUntil: -1, want: false},
+		{name: "future mute", mutedUntil: time.Now().Add(time.Hour).UnixMilli(), want: false},
+		{name: "expired mute", mutedUntil: time.Now().Add(-time.Hour).UnixMilli(), want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			content, err := json.Marshal(event.BeeperMuteEventContent{
+				MutedUntil: test.mutedUntil,
+			})
+			if err != nil {
+				t.Fatalf("marshal mute content: %v", err)
+			}
+			accountData := []*database.AccountData{{
+				Type:    event.AccountDataBeeperMute.Type,
+				Content: content,
+			}}
+
+			if got := roomAccountDataAllowsPush(accountData); got != test.want {
+				t.Fatalf("roomAccountDataAllowsPush() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRoomAccountDataAllowsPushDefaultsToEnabled(t *testing.T) {
+	if !roomAccountDataAllowsPush(nil) {
+		t.Fatal("roomAccountDataAllowsPush() disabled push without mute account data")
 	}
 }

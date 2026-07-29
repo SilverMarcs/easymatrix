@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -39,6 +41,23 @@ func (s *Server) muteChat(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := s.rt.Client().Client.SetRoomAccountData(r.Context(), id.RoomID(chatID), event.AccountDataBeeperMute.Type, content); err != nil {
 		return errs.Internal(fmt.Errorf("failed to set mute state: %w", err))
+	}
+	// The homeserver echoes room account data through sync, but a message can
+	// arrive before that echo. Update the local gomuks view immediately so APNs
+	// filtering and chat hydration observe the state once this request returns.
+	if cli := s.rt.Client(); cli != nil && cli.Account != nil {
+		raw, marshalErr := json.Marshal(content)
+		if marshalErr != nil {
+			log.Printf("failed to encode local mute state for %s: %v", chatID, marshalErr)
+		} else if _, cacheErr := cli.DB.AccountData.PutRoom(
+			r.Context(),
+			cli.Account.UserID,
+			id.RoomID(chatID),
+			event.AccountDataBeeperMute,
+			raw,
+		); cacheErr != nil {
+			log.Printf("failed to cache local mute state for %s: %v", chatID, cacheErr)
+		}
 	}
 	return writeJSON(w, compat.ActionSuccessOutput{Success: true})
 }
@@ -170,4 +189,3 @@ func isMessageReadByOther(sortKey string, maxOtherRead int64) bool {
 	}
 	return sk <= maxOtherRead
 }
-

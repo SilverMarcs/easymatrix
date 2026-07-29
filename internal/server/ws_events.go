@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -284,6 +285,9 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 		wantsPush := domainEvent.Type == wsDomainTypeMessageUpserted &&
 			len(targets) == 0 &&
 			h.server.push.canSend()
+		if wantsPush && !h.server.chatAllowsPush(context.Background(), domainEvent.ChatID) {
+			wantsPush = false
+		}
 		if len(targets) == 0 && !wantsPush {
 			continue
 		}
@@ -340,6 +344,30 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 			h.write(target, payload)
 		}
 	}
+}
+
+func (s *Server) chatAllowsPush(ctx context.Context, chatID string) bool {
+	cli := s.rt.Client()
+	if cli == nil || cli.Account == nil {
+		return false
+	}
+	accountData, err := cli.DB.AccountData.GetAllRoom(ctx, cli.Account.UserID, id.RoomID(chatID))
+	if err != nil {
+		log.Printf("failed to load mute state for push in %s: %v", chatID, err)
+		return false
+	}
+	return roomAccountDataAllowsPush(accountData)
+}
+
+func roomAccountDataAllowsPush(accountData []*database.AccountData) bool {
+	state := roomAccountDataState{}
+	for _, item := range accountData {
+		if item == nil {
+			continue
+		}
+		state = applyRoomAccountDataContent(state, item.Type, item.Content)
+	}
+	return !state.IsMuted
 }
 
 func (s *Server) addPushChatContext(chatID string, entries []compatRecord) {
