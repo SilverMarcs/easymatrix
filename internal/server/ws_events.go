@@ -20,6 +20,8 @@ import (
 	"go.mau.fi/gomuks/pkg/hicli/jsoncmd"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"github.com/batuhan/easymatrix/internal/compat"
 )
 
 const (
@@ -353,7 +355,7 @@ func (s *Server) chatAllowsPush(ctx context.Context, chatID string) bool {
 	}
 	accountData, err := cli.DB.AccountData.GetAllRoom(ctx, cli.Account.UserID, id.RoomID(chatID))
 	if err != nil {
-		log.Printf("failed to load mute state for push in %s: %v", chatID, err)
+		log.Printf("failed to load notification state for push in %s: %v", chatID, err)
 		return false
 	}
 	return roomAccountDataAllowsPush(accountData)
@@ -367,7 +369,10 @@ func roomAccountDataAllowsPush(accountData []*database.AccountData) bool {
 		}
 		state = applyRoomAccountDataContent(state, item.Type, item.Content)
 	}
-	return !state.IsMuted
+	// Match Relay's local-notification gate: only unmuted chats in the
+	// primary inbox are eligible. Low-priority and archived chats remain
+	// available in their dedicated inboxes without generating alerts.
+	return !state.IsMuted && !state.IsLowPriority && !state.EffectiveArchived()
 }
 
 func (s *Server) addPushChatContext(chatID string, entries []compatRecord) {
@@ -382,10 +387,33 @@ func (s *Server) addPushChatContext(chatID string, entries []compatRecord) {
 
 	title := strings.TrimSpace(ptrString(room.Name))
 	isGroupChat := room.DMUserID == nil || strings.TrimSpace(string(*room.DMUserID)) == ""
+	participants, _ := s.loadRoomParticipants(context.Background(), room)
 	for _, entry := range entries {
 		entry["chatTitle"] = title
 		entry["isGroupChat"] = isGroupChat
+		entry["pushAvatarURL"] = pushAvatarURL(room, participants, entry, isGroupChat)
 	}
+}
+
+func pushAvatarURL(room *database.Room, participants []compat.User, entry compatRecord, isGroupChat bool) string {
+	if isGroupChat {
+		if room.Avatar == nil {
+			return ""
+		}
+		avatarURL := strings.TrimSpace(room.Avatar.String())
+		if avatarURL == "mxc://" {
+			return ""
+		}
+		return avatarURL
+	}
+
+	senderID, _ := entry["senderID"].(string)
+	for _, participant := range participants {
+		if participant.ID == senderID {
+			return strings.TrimSpace(participant.ImgURL)
+		}
+	}
+	return ""
 }
 
 func (h *wsHub) subscribedTargets(chatID string) []*wsClient {

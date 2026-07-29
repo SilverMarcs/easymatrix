@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,14 +24,17 @@ import (
 )
 
 type pushDevice struct {
-	Token     string    `json:"token"`
-	Platform  string    `json:"platform"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Token       string    `json:"token"`
+	Platform    string    `json:"platform"`
+	ServerURL   string    `json:"server_url,omitempty"`
+	AccessToken string    `json:"access_token,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type pushDeviceInput struct {
-	Token    string `json:"token"`
-	Platform string `json:"platform"`
+	Token     string `json:"token"`
+	Platform  string `json:"platform"`
+	ServerURL string `json:"serverURL"`
 }
 
 type pushService struct {
@@ -88,12 +92,12 @@ func (p *pushService) delete(token string) error {
 	return p.save()
 }
 
-func (p *pushService) tokens() []string {
+func (p *pushService) registeredDevices() []pushDevice {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	output := make([]string, 0, len(p.devices))
-	for token := range p.devices {
-		output = append(output, token)
+	output := make([]pushDevice, 0, len(p.devices))
+	for _, device := range p.devices {
+		output = append(output, device)
 	}
 	return output
 }
@@ -166,12 +170,13 @@ func (p *pushService) notifyMessages(entries []compatRecord) {
 		return
 	}
 	for _, entry := range entries {
-		payload, shouldSend := makePushPayload(entry)
-		if !shouldSend {
-			continue
-		}
-		for _, token := range p.tokens() {
-			if err := p.provider.send(token, payload); err != nil {
+		for _, device := range p.registeredDevices() {
+			payload, shouldSend := makePushPayload(entry)
+			if !shouldSend {
+				continue
+			}
+			addPushAvatarURL(payload, entry, device)
+			if err := p.provider.send(device.Token, payload); err != nil {
 				log.Printf("APNs delivery failed: %v", err)
 			}
 		}
@@ -179,6 +184,10 @@ func (p *pushService) notifyMessages(entries []compatRecord) {
 }
 
 func makePushPayload(entry compatRecord) (map[string]any, bool) {
+	return makePushPayloadAt(entry, time.Now())
+}
+
+func makePushPayloadAt(entry compatRecord, now time.Time) (map[string]any, bool) {
 	if isSender, _ := entry["isSender"].(bool); isSender {
 		return nil, false
 	}
@@ -193,6 +202,15 @@ func makePushPayload(entry compatRecord) (map[string]any, bool) {
 	body, _ := entry["text"].(string)
 	chatTitle, _ := entry["chatTitle"].(string)
 	isGroupChat, _ := entry["isGroupChat"].(bool)
+	senderID, _ := entry["senderID"].(string)
+	lowercasedBody := strings.ToLower(body)
+	if strings.Contains(lowercasedBody, "joined the chat") ||
+		strings.Contains(lowercasedBody, "was invited to the chat") {
+		return nil, false
+	}
+	if timestamp, ok := pushMessageTimestamp(entry); ok && now.Sub(timestamp) > time.Minute {
+		return nil, false
+	}
 	if strings.TrimSpace(body) == "" {
 		body = "Sent an attachment"
 	}
@@ -207,14 +225,51 @@ func makePushPayload(entry compatRecord) (map[string]any, bool) {
 	}
 	return map[string]any{
 		"aps": map[string]any{
-			"alert":     alert,
-			"sound":     "default",
-			"thread-id": chatID,
-			"category":  "MESSAGE",
+			"alert":           alert,
+			"sound":           "default",
+			"thread-id":       chatID,
+			"category":        "MESSAGE",
+			"mutable-content": 1,
 		},
-		"chatID":    chatID,
-		"messageID": messageID,
+		"chatID":      chatID,
+		"messageID":   messageID,
+		"senderID":    senderID,
+		"senderName":  senderName,
+		"chatTitle":   chatTitle,
+		"isGroupChat": isGroupChat,
 	}, true
+}
+
+func pushMessageTimestamp(entry compatRecord) (time.Time, bool) {
+	switch value := entry["timestamp"].(type) {
+	case string:
+		timestamp, err := time.Parse(time.RFC3339Nano, value)
+		return timestamp, err == nil
+	case time.Time:
+		return value, true
+	default:
+		return time.Time{}, false
+	}
+}
+
+func addPushAvatarURL(payload map[string]any, entry compatRecord, device pushDevice) {
+	avatarSourceURL, _ := entry["pushAvatarURL"].(string)
+	avatarSourceURL = strings.TrimSpace(avatarSourceURL)
+	if avatarSourceURL == "" || strings.TrimSpace(device.AccessToken) == "" {
+		return
+	}
+
+	serverURL, err := url.Parse(strings.TrimSpace(device.ServerURL))
+	if err != nil || (serverURL.Scheme != "https" && serverURL.Scheme != "http") || serverURL.Host == "" {
+		return
+	}
+
+	serverURL.Path = strings.TrimRight(serverURL.Path, "/") + "/v1/assets/serve"
+	query := serverURL.Query()
+	query.Set("url", avatarSourceURL)
+	query.Set("assetAccessSignature", assetAccessSignature(device.AccessToken, avatarSourceURL))
+	serverURL.RawQuery = query.Encode()
+	payload["avatarURL"] = serverURL.String()
 }
 
 func (s *Server) registerPushDevice(w http.ResponseWriter, r *http.Request) error {
@@ -230,10 +285,19 @@ func (s *Server) registerPushDevice(w http.ResponseWriter, r *http.Request) erro
 	if input.Platform == "" {
 		input.Platform = "apple"
 	}
+	input.ServerURL = strings.TrimRight(strings.TrimSpace(input.ServerURL), "/")
+	if input.ServerURL != "" {
+		serverURL, parseErr := url.Parse(input.ServerURL)
+		if parseErr != nil || (serverURL.Scheme != "https" && serverURL.Scheme != "http") || serverURL.Host == "" {
+			return errs.Validation(map[string]any{"serverURL": "must be an absolute HTTP or HTTPS URL"})
+		}
+	}
 	if err = s.push.register(pushDevice{
-		Token:     input.Token,
-		Platform:  input.Platform,
-		UpdatedAt: time.Now().UTC(),
+		Token:       input.Token,
+		Platform:    input.Platform,
+		ServerURL:   input.ServerURL,
+		AccessToken: parseAuthTokenFromRequest(r),
+		UpdatedAt:   time.Now().UTC(),
 	}); err != nil {
 		return err
 	}

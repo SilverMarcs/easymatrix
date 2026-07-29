@@ -72,9 +72,14 @@ Once running:
 - `APNS_ENVIRONMENT`: `sandbox` (default) or `production`
 
 When APNs is configured, authenticated clients can register device tokens with
-`POST /v1/push/devices`. Registrations are persisted inside the gomuks state
-directory. WebSockets remain the foreground live-update transport; APNs handles
-alerts while Apple platforms suspend the app.
+`POST /v1/push/devices`, providing `token`, `platform`, and the public
+`serverURL` used by the notification service extension. Registrations are
+persisted inside the gomuks state directory. WebSockets remain the foreground
+live-update transport; APNs handles alerts while Apple platforms suspend the
+app. Push payloads use asset-specific signatures for chat avatars, so the
+server access token is never included in a notification URL. Push alerts mirror
+Relay's local notification policy: muted, archived, and low-priority chats are
+silent, as are outgoing, reaction, membership, duplicate, and stale events.
 
 gomuks-compatible overrides:
 
