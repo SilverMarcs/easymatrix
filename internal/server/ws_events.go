@@ -47,6 +47,7 @@ const (
 	wsErrorCodeNotSubscribed     = "NOT_SUBSCRIBED"
 	wsErrorCodeInternal          = "INTERNAL_ERROR"
 	wsWildcardSubscriptionChatID = "*"
+	maxPushParticipants          = 8
 )
 
 type wsSetSubscriptionsInput struct {
@@ -392,7 +393,35 @@ func (s *Server) addPushChatContext(chatID string, entries []compatRecord) {
 		entry["chatTitle"] = title
 		entry["isGroupChat"] = isGroupChat
 		entry["pushAvatarURL"] = pushAvatarURL(room, participants, entry, isGroupChat)
+		entry["pushParticipants"] = pushGroupParticipants(participants, entry, isGroupChat)
 	}
+}
+
+func pushGroupParticipants(participants []compat.User, entry compatRecord, isGroupChat bool) []pushParticipant {
+	if !isGroupChat {
+		return nil
+	}
+
+	senderID, _ := entry["senderID"].(string)
+	output := make([]pushParticipant, 0, min(len(participants), maxPushParticipants))
+	for _, participant := range participants {
+		participantID := strings.TrimSpace(participant.ID)
+		if participantID == "" || participant.IsSelf || participantID == senderID {
+			continue
+		}
+		name := strings.TrimSpace(participant.FullName)
+		if name == "" {
+			name = strings.TrimSpace(participant.Username)
+		}
+		if name == "" {
+			name = participantID
+		}
+		output = append(output, pushParticipant{ID: participantID, Name: name})
+		if len(output) == maxPushParticipants {
+			break
+		}
+	}
+	return output
 }
 
 func pushAvatarURL(room *database.Room, participants []compat.User, entry compatRecord, isGroupChat bool) string {

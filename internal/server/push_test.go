@@ -10,6 +10,8 @@ import (
 
 	"go.mau.fi/gomuks/pkg/hicli/database"
 	"maunium.net/go/mautrix/event"
+
+	"github.com/batuhan/easymatrix/internal/compat"
 )
 
 func TestPushRegistrationsPersist(t *testing.T) {
@@ -61,6 +63,9 @@ func TestGroupPushPayloadUsesThreeTextLevels(t *testing.T) {
 		"chatTitle":   "Weekend Plans",
 		"isGroupChat": true,
 		"text":        "Dinner at seven?",
+		"pushParticipants": []pushParticipant{
+			{ID: "@bob:example.test", Name: "Bob"},
+		},
 	})
 	if !ok {
 		t.Fatal("makePushPayload() skipped an incoming group message")
@@ -82,6 +87,39 @@ func TestGroupPushPayloadUsesThreeTextLevels(t *testing.T) {
 	}
 	if payload["senderID"] != "@alice:example.test" {
 		t.Fatalf("senderID = %v, want @alice:example.test", payload["senderID"])
+	}
+	participants, ok := payload["groupParticipants"].([]pushParticipant)
+	if !ok || len(participants) != 1 || participants[0].ID != "@bob:example.test" {
+		t.Fatalf("groupParticipants = %#v, want Bob", payload["groupParticipants"])
+	}
+}
+
+func TestPushGroupParticipantsExcludesSelfAndSenderAndCapsPayload(t *testing.T) {
+	participants := []compat.User{
+		{ID: "@self:example.test", FullName: "Me", IsSelf: true},
+		{ID: "@sender:example.test", FullName: "Sender"},
+	}
+	for _, participantID := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"} {
+		participants = append(participants, compat.User{
+			ID:       participantID,
+			FullName: "Member " + participantID,
+		})
+	}
+
+	output := pushGroupParticipants(
+		participants,
+		compatRecord{"senderID": "@sender:example.test"},
+		true,
+	)
+
+	if len(output) != maxPushParticipants {
+		t.Fatalf("participant count = %d, want %d", len(output), maxPushParticipants)
+	}
+	if output[0].ID != "1" || output[len(output)-1].ID != "8" {
+		t.Fatalf("participants = %#v, want first eight non-self recipients", output)
+	}
+	if got := pushGroupParticipants(participants, nil, false); got != nil {
+		t.Fatalf("direct-chat participants = %#v, want nil", got)
 	}
 }
 

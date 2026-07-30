@@ -37,6 +37,11 @@ type pushDeviceInput struct {
 	ServerURL string `json:"serverURL"`
 }
 
+type pushParticipant struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type pushService struct {
 	mu                sync.RWMutex
 	persistMu         sync.Mutex
@@ -223,7 +228,7 @@ func makePushPayloadAt(entry compatRecord, now time.Time) (map[string]any, bool)
 		alert["title"] = chatTitle
 		alert["subtitle"] = senderName
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"aps": map[string]any{
 			"alert":           alert,
 			"sound":           "default",
@@ -237,7 +242,11 @@ func makePushPayloadAt(entry compatRecord, now time.Time) (map[string]any, bool)
 		"senderName":  senderName,
 		"chatTitle":   chatTitle,
 		"isGroupChat": isGroupChat,
-	}, true
+	}
+	if participants, ok := entry["pushParticipants"].([]pushParticipant); ok && len(participants) > 0 {
+		payload["groupParticipants"] = participants
+	}
+	return payload, true
 }
 
 func pushMessageTimestamp(entry compatRecord) (time.Time, bool) {
