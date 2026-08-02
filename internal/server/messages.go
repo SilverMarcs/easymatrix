@@ -519,7 +519,8 @@ func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, roo
 	if evt.RelationType == event.RelReplace {
 		return compat.Message{}, errSkipEvent
 	}
-	if evtType != event.EventMessage.Type && evtType != event.EventSticker.Type && evtType != event.EventReaction.Type {
+	if evtType != event.EventMessage.Type && evtType != event.EventSticker.Type &&
+		evtType != event.EventReaction.Type && evtType != event.StateMember.Type {
 		return compat.Message{}, errSkipEvent
 	}
 
@@ -567,6 +568,36 @@ func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, roo
 	}
 
 	switch evtType {
+	case event.StateMember.Type:
+		var member event.MemberEventContent
+		if err := json.Unmarshal(evt.GetContent(), &member); err != nil {
+			return compat.Message{}, errSkipEvent
+		}
+		switch member.Membership {
+		case event.MembershipJoin:
+			message.Type = compat.MessageType("MEMBER_JOIN")
+		case event.MembershipInvite:
+			message.Type = compat.MessageType("MEMBER_INVITE")
+		default:
+			return compat.Message{}, errSkipEvent
+		}
+		if evt.StateKey != nil && strings.TrimSpace(*evt.StateKey) != "" {
+			message.SenderID = *evt.StateKey
+			message.IsSender = message.SenderID == string(s.rt.Client().Account.UserID)
+		}
+		if name, ok := reactions.Names[message.SenderID]; ok {
+			message.SenderName = name
+		} else if strings.TrimSpace(member.Displayname) != "" {
+			message.SenderName = member.Displayname
+		} else {
+			message.SenderName = message.SenderID
+		}
+		if message.Type == compat.MessageType("MEMBER_JOIN") {
+			message.Text = message.SenderName + " joined the chat"
+		} else {
+			message.Text = message.SenderName + " was invited to the chat"
+		}
+		return message, nil
 	case event.EventReaction.Type:
 		var reaction event.ReactionEventContent
 		if err := json.Unmarshal(evt.GetContent(), &reaction); err == nil {

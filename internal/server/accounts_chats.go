@@ -42,8 +42,8 @@ type bridgeStateContent struct {
 }
 
 type bridgeEntry struct {
-	BridgeState bridgeRunState                `json:"bridgeState"`
-	RemoteState map[string]bridgeRemoteState  `json:"remoteState"`
+	BridgeState bridgeRunState               `json:"bridgeState"`
+	RemoteState map[string]bridgeRemoteState `json:"remoteState"`
 }
 
 type bridgeRunState struct {
@@ -156,6 +156,33 @@ func (s *Server) getAccounts(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, accounts)
 }
 
+func (s *Server) getSession(w http.ResponseWriter, r *http.Request) error {
+	accounts, err := s.loadAccounts(r.Context())
+	if err != nil {
+		return err
+	}
+
+	cli := s.rt.Client()
+	user := newCompatUser(userShape{ID: string(cli.Account.UserID), IsSelf: true})
+	for _, account := range accounts {
+		if account.User.IsSelf && account.User.FullName != "" && account.User.FullName != account.User.ID {
+			user = account.User
+			break
+		}
+	}
+	if profile, profileErr := cli.Client.GetProfile(r.Context(), cli.Account.UserID); profileErr == nil && profile != nil &&
+		(strings.TrimSpace(profile.DisplayName) != "" || !profile.AvatarURL.IsEmpty()) {
+		user = newCompatUser(userShape{
+			ID:       string(cli.Account.UserID),
+			FullName: profile.DisplayName,
+			ImgURL:   profile.AvatarURL.String(),
+			IsSelf:   true,
+		})
+	}
+
+	return writeJSON(w, compat.SessionOutput{User: user, Accounts: accounts})
+}
+
 func (s *Server) buildAccountLookup(ctx context.Context) (*accountLookup, error) {
 	accounts, err := s.loadAccounts(ctx)
 	if err != nil {
@@ -257,9 +284,24 @@ func (s *Server) loadAccounts(ctx context.Context) ([]compat.Account, error) {
 		})
 	}
 
+	for index := range accounts {
+		networkID := bridgeIDFromAccountID(accounts[index].AccountID)
+		if networkID == "" {
+			networkID = "matrix"
+		}
+		accounts[index].NetworkID = networkID
+		accounts[index].Capabilities = capabilitiesForNetwork(networkID)
+	}
+
 	return accounts, nil
 }
 
+func capabilitiesForNetwork(networkID string) compat.AccountCapabilities {
+	normalized := strings.TrimSuffix(strings.TrimPrefix(networkID, "local-"), "go")
+	return compat.AccountCapabilities{
+		UnlimitedMessageEdits: normalized == "telegram",
+	}
+}
 
 func bridgeIDFromAccountID(accountID string) string {
 	// Account IDs are now the bridge name directly (e.g., "whatsapp", "discordgo").
@@ -614,6 +656,11 @@ func (s *Server) mapRoomToChat(ctx context.Context, room *database.Room, lookup 
 
 	if includePreview && room.PreviewEventRowID > 0 {
 		if previewEvt, err := s.rt.Client().DB.Event.GetByRowID(ctx, room.PreviewEventRowID); err == nil && previewEvt != nil {
+			// Preview hydration must resolve edits just like timeline and realtime
+			// hydration, otherwise an edited last message leaves stale sidebar text.
+			if editErr := s.populateLastEditRefs(ctx, []*database.Event{previewEvt}); editErr != nil {
+				return compat.Chat{}, editErr
+			}
 			memberNames := s.loadMemberNameMap(ctx, room.ID)
 			if preview, mapErr := s.mapEventToMessage(ctx, previewEvt, room, lookup, reactionBundle{Names: memberNames}); mapErr == nil {
 				// Fix preview sortKey: GetByRowID returns TimelineRowID=-1.

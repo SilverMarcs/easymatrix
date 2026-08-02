@@ -100,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /focus/{chatID}/{messageID}", s.public(s.focusPage))
 
 	s.handle(mux, "GET /v1/accounts", s.getAccounts, false, "read")
+	s.handle(mux, "GET /v1/session", s.getSession, false, "read")
 
 	s.handle(mux, "GET /v1/chats", s.listChats, false, "read")
 	s.handle(mux, "POST /v1/chats", s.createChat, false, "write")

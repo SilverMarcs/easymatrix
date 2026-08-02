@@ -8,9 +8,20 @@ import (
 type User = shared.User
 
 type Account struct {
-	AccountID string `json:"accountID"`
-	User      User   `json:"user"`
-	Network   string `json:"network,omitempty"`
+	AccountID    string              `json:"accountID"`
+	User         User                `json:"user"`
+	NetworkID    string              `json:"networkID"`
+	Network      string              `json:"network"`
+	Capabilities AccountCapabilities `json:"capabilities"`
+}
+
+type AccountCapabilities struct {
+	UnlimitedMessageEdits bool `json:"unlimitedMessageEdits"`
+}
+
+type SessionOutput struct {
+	User     User      `json:"user"`
+	Accounts []Account `json:"accounts"`
 }
 
 type Participants = beeperdesktopapi.ChatParticipants

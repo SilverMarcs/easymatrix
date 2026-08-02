@@ -4,6 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"go.mau.fi/gomuks/pkg/hicli/database"
+	"go.mau.fi/gomuks/pkg/hicli/jsoncmd"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 )
 
 func TestWSProcessRawPayloadRejectsWildcardWithSpecificIDs(t *testing.T) {
@@ -92,6 +97,37 @@ func TestWSDropDuplicateUsesDebounceWindow(t *testing.T) {
 	}
 	if hub.dropDuplicate(domainEvent, nil, now.Add(2*wsDuplicateEventDebounce)) {
 		t.Fatalf("expected event outside debounce window to be delivered")
+	}
+}
+
+func TestMapSyncCompletePublishesMembershipAsSemanticMessage(t *testing.T) {
+	roomID := id.RoomID("!room:example.com")
+	memberID := "$member-event"
+	stateKey := "@alice:example.com"
+	events := mapSyncCompleteToDomainEvents(&jsoncmd.SyncComplete{
+		Rooms: map[id.RoomID]*jsoncmd.SyncRoom{
+			roomID: {
+				Events: []*database.Event{{
+					RoomID:   roomID,
+					ID:       id.EventID(memberID),
+					Type:     event.StateMember.Type,
+					StateKey: &stateKey,
+				}},
+			},
+		},
+	})
+
+	var foundChat, foundMessage bool
+	for _, domainEvent := range events {
+		switch domainEvent.Type {
+		case wsDomainTypeChatUpserted:
+			foundChat = true
+		case wsDomainTypeMessageUpserted:
+			foundMessage = len(domainEvent.IDs) == 1 && domainEvent.IDs[0] == memberID
+		}
+	}
+	if !foundChat || !foundMessage {
+		t.Fatalf("expected membership sync to publish chat and message upserts, got %#v", events)
 	}
 }
 

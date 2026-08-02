@@ -294,6 +294,29 @@ Typical event families:
 - `message.deleted`
 - `error`
 
+Domain events are ordered by a per-connection `seq`. Clients should apply the
+hydrated `entries` directly and refresh REST snapshots only after reconnecting,
+detecting a sequence gap, or receiving an event that could not be hydrated.
+`message.deleted` includes the deleted IDs, and realtime message entries include
+`transactionID` when gomuks has one so optimistic sends can reconcile exactly.
+
+Chat list and search endpoints accept repeated or comma-separated `accountIDs`
+query values. Both return hydrated chat summaries, including the latest preview,
+so clients do not need per-result detail requests. Message membership state is
+returned semantically as `MEMBER_JOIN` or `MEMBER_INVITE` rather than requiring
+clients to inspect localized text.
+
+Authenticated clients can load identity and canonical network metadata in one
+request:
+
+```text
+GET /v1/session
+```
+
+The response contains `user` and `accounts`; each account includes `networkID`,
+the network display name, and server-owned `capabilities` such as
+`unlimitedMessageEdits`.
+
 ## CLI
 
 The package ships a small CLI wrapper:

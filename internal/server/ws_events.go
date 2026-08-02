@@ -567,6 +567,9 @@ func (s *Server) hydrateMessagesForWSEvent(chatID string, messageIDs []string) (
 		if marshalErr != nil {
 			continue
 		}
+		if transactionID := strings.TrimSpace(evt.TransactionID); transactionID != "" {
+			serialized["transactionID"] = transactionID
+		}
 		byID[message.ID] = serialized
 	}
 
@@ -894,7 +897,8 @@ func mapSyncCompleteToDomainEvents(syncComplete *jsoncmd.SyncComplete) []wsDomai
 				if evt.ID != "" {
 					messageDeletedIDs[string(evt.ID)] = struct{}{}
 				}
-			case evtType == event.EventMessage.Type || evtType == event.EventSticker.Type || evtType == event.EventReaction.Type:
+			case evtType == event.EventMessage.Type || evtType == event.EventSticker.Type ||
+				evtType == event.EventReaction.Type || evtType == event.StateMember.Type:
 				chatTouched = true
 				targetID := string(evt.ID)
 				if evtType == event.EventReaction.Type && evt.RelatesTo != "" {
