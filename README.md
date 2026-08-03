@@ -288,6 +288,7 @@ Typical event families:
 
 - `ready`
 - `subscriptions.updated`
+- `presence.updated`
 - `chat.upserted`
 - `chat.deleted`
 - `message.upserted`
@@ -299,6 +300,13 @@ hydrated `entries` directly and refresh REST snapshots only after reconnecting,
 detecting a sequence gap, or receiving an event that could not be hydrated.
 `message.deleted` includes the deleted IDs, and realtime message entries include
 `transactionID` when gomuks has one so optimistic sends can reconcile exactly.
+
+Clients can send `{"type":"presence.set","active":false}` while they remain
+connected but are not the active/frontmost app. Inactive subscribers continue
+receiving realtime events, but they do not suppress push delivery. Connections
+that do not report presence retain the legacy behavior and are treated as active.
+This command is available when the `ready` event reports protocol `version: 2`
+or later.
 
 Chat list and search endpoints accept repeated or comma-separated `accountIDs`
 query values. Both return hydrated chat summaries, including the latest preview,

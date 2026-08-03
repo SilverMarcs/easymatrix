@@ -51,6 +51,63 @@ func TestWSProcessRawPayloadRejectsUnknownCommands(t *testing.T) {
 	}
 }
 
+func TestWSProcessRawPayloadUpdatesPresence(t *testing.T) {
+	hub, messages := newTestWSHub()
+
+	err := hub.processRawPayload(1, []byte(`{"type":"presence.set","requestID":"p1","active":false}`))
+	if err != nil {
+		t.Fatalf("processRawPayload returned error: %v", err)
+	}
+	if len(*messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(*messages))
+	}
+	if hub.clients[1].state.active {
+		t.Fatal("expected client presence to be inactive")
+	}
+
+	updated, ok := (*messages)[0].(wsPresenceUpdatedMessage)
+	if !ok {
+		t.Fatalf("expected presence.updated, got %T", (*messages)[0])
+	}
+	if updated.Type != wsPresenceUpdatedType || updated.RequestID != "p1" || updated.Active {
+		t.Fatalf("unexpected presence response: %#v", updated)
+	}
+}
+
+func TestWSProcessRawPayloadRejectsInvalidPresence(t *testing.T) {
+	hub, messages := newTestWSHub()
+
+	err := hub.processRawPayload(1, []byte(`{"type":"presence.set","requestID":"p2","active":"yes"}`))
+	if err != nil {
+		t.Fatalf("processRawPayload returned error: %v", err)
+	}
+
+	msg := decodeWSErrorMessage(t, (*messages)[0])
+	if msg.Code != wsErrorCodeInvalidPayload {
+		t.Fatalf("expected invalid payload error, got %q", msg.Code)
+	}
+}
+
+func TestWSInactiveSubscriberDoesNotSuppressPush(t *testing.T) {
+	hub, _ := newTestWSHub()
+	hub.clients[1].state.chatIDs = []string{wsWildcardSubscriptionChatID}
+	hub.clients[1].state.active = false
+
+	targets, hasActiveSubscriber := hub.subscribedTargets("chat_a")
+	if len(targets) != 1 {
+		t.Fatalf("expected inactive subscriber to keep receiving realtime events, got %d targets", len(targets))
+	}
+	if hasActiveSubscriber {
+		t.Fatal("inactive subscriber must not suppress push")
+	}
+
+	hub.clients[1].state.active = true
+	_, hasActiveSubscriber = hub.subscribedTargets("chat_a")
+	if !hasActiveSubscriber {
+		t.Fatal("active subscriber should suppress push")
+	}
+}
+
 func TestBuildWSFingerprintIgnoresTimestampLikeFields(t *testing.T) {
 	domainEvent := wsDomainEvent{
 		Type:   wsDomainTypeMessageUpserted,
@@ -141,6 +198,7 @@ func newTestWSHub() (*wsHub, *[]any) {
 		id: 1,
 		state: &wsClientState{
 			chatIDs: []string{},
+			active:  true,
 		},
 		send: func(payload any) error {
 			messages = append(messages, payload)
