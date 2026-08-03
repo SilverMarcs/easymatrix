@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	messagePageSize = 20
+	messagePageSize = 40
 )
 
 const timelineSelectBase = `
