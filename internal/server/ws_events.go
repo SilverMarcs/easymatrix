@@ -315,9 +315,9 @@ func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 		}
 
 		var entries []compatRecord
-		if domainEvent.Type == wsDomainTypeMessageUpserted {
+		if domainEvent.Type == wsDomainTypeMessageUpserted || domainEvent.Type == wsDomainTypeMessageDeleted {
 			hydrated, err := h.server.hydrateMessagesForWSEvent(domainEvent.ChatID, domainEvent.IDs)
-			if err != nil || len(hydrated) == 0 {
+			if err != nil || (domainEvent.Type == wsDomainTypeMessageUpserted && len(hydrated) == 0) {
 				continue
 			}
 			entries = hydrated

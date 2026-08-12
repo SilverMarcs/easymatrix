@@ -1,6 +1,8 @@
 package compat
 
 import (
+	"time"
+
 	beeperdesktopapi "github.com/beeper/desktop-api-go"
 	"github.com/beeper/desktop-api-go/shared"
 )
@@ -29,9 +31,30 @@ type Attachment = shared.Attachment
 type AttachmentType = shared.AttachmentType
 type AttachmentSize = shared.AttachmentSize
 type Reaction = shared.Reaction
-type Message = shared.Message
 type MessageType = shared.MessageType
 type ChatType = beeperdesktopapi.ChatType
+
+// Message extends the desktop API-compatible message shape with deletion
+// state. Redacted Matrix events can retain their original content in the local
+// database, so clients can render that content with deleted styling instead of
+// replacing it with a generic tombstone.
+type Message struct {
+	ID              string       `json:"id"`
+	AccountID       string       `json:"accountID"`
+	ChatID          string       `json:"chatID"`
+	SenderID        string       `json:"senderID"`
+	SortKey         string       `json:"sortKey"`
+	Timestamp       time.Time    `json:"timestamp"`
+	Attachments     []Attachment `json:"attachments"`
+	IsSender        bool         `json:"isSender"`
+	IsUnread        bool         `json:"isUnread"`
+	IsDeleted       bool         `json:"isDeleted,omitempty"`
+	LinkedMessageID string       `json:"linkedMessageID"`
+	Reactions       []Reaction   `json:"reactions"`
+	SenderName      string       `json:"senderName"`
+	Text            string       `json:"text"`
+	Type            MessageType  `json:"type"`
+}
 
 type Chat struct {
 	beeperdesktopapi.Chat

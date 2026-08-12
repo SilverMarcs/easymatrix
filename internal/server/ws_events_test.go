@@ -188,6 +188,31 @@ func TestMapSyncCompletePublishesMembershipAsSemanticMessage(t *testing.T) {
 	}
 }
 
+func TestMapSyncCompletePublishesRedactedMessageAsDeletion(t *testing.T) {
+	roomID := id.RoomID("!room:example.com")
+	messageID := id.EventID("$deleted-message")
+	events := mapSyncCompleteToDomainEvents(&jsoncmd.SyncComplete{
+		Rooms: map[id.RoomID]*jsoncmd.SyncRoom{
+			roomID: {
+				Events: []*database.Event{{
+					RoomID:     roomID,
+					ID:         messageID,
+					Type:       event.EventMessage.Type,
+					RedactedBy: "$redaction",
+				}},
+			},
+		},
+	})
+
+	for _, domainEvent := range events {
+		if domainEvent.Type == wsDomainTypeMessageDeleted &&
+			len(domainEvent.IDs) == 1 && domainEvent.IDs[0] == string(messageID) {
+			return
+		}
+	}
+	t.Fatalf("expected redacted message deletion event, got %#v", events)
+}
+
 func newTestWSHub() (*wsHub, *[]any) {
 	messages := make([]any, 0, 1)
 	hub := &wsHub{

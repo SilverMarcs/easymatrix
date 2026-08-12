@@ -550,6 +550,7 @@ func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, roo
 		Timestamp: evt.Timestamp.Time.UTC(),
 		SortKey:   messageSortKey(evt),
 		IsSender:  evt.Sender == s.rt.Client().Account.UserID,
+		IsDeleted: evt.RedactedBy != "",
 		Reactions: reactions.Reactions[evt.ID],
 	}
 	if name, ok := reactions.Names[string(evt.Sender)]; ok {
@@ -559,12 +560,6 @@ func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, roo
 	}
 	if replyTo := evt.GetReplyTo(); replyTo != "" {
 		message.LinkedMessageID = string(replyTo)
-	}
-
-	if evt.RedactedBy != "" {
-		message.Type = compat.MessageType("TEXT")
-		message.Text = ""
-		return message, nil
 	}
 
 	switch evtType {
@@ -609,22 +604,29 @@ func (s *Server) mapEventToMessage(ctx context.Context, evt *database.Event, roo
 		}
 		return message, nil
 	case event.EventSticker.Type, event.EventMessage.Type:
-		var content event.MessageEventContent
-		if err := json.Unmarshal(evt.GetContent(), &content); err != nil {
+		if err := applyStoredMessageContent(&message, evt, evtType); err != nil {
 			return compat.Message{}, errSkipEvent
-		}
-		message.Type = mapMessageType(evtType, content.MsgType)
-		message.Text = content.Body
-		if message.Text == "" && evt.LocalContent != nil {
-			message.Text = evt.LocalContent.SanitizedHTML
-		}
-		if att, ok := messageAttachment(content, evtType); ok {
-			message.Attachments = []compat.Attachment{att}
 		}
 		return message, nil
 	default:
 		return compat.Message{}, errSkipEvent
 	}
+}
+
+func applyStoredMessageContent(message *compat.Message, evt *database.Event, evtType string) error {
+	var content event.MessageEventContent
+	if err := json.Unmarshal(evt.GetContent(), &content); err != nil {
+		return err
+	}
+	message.Type = mapMessageType(evtType, content.MsgType)
+	message.Text = content.Body
+	if message.Text == "" && evt.LocalContent != nil {
+		message.Text = evt.LocalContent.SanitizedHTML
+	}
+	if attachment, ok := messageAttachment(content, evtType); ok {
+		message.Attachments = []compat.Attachment{attachment}
+	}
+	return nil
 }
 
 func mapMessageType(evtType string, msgType event.MessageType) compat.MessageType {

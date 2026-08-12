@@ -298,8 +298,12 @@ Typical event families:
 Domain events are ordered by a per-connection `seq`. Clients should apply the
 hydrated `entries` directly and refresh REST snapshots only after reconnecting,
 detecting a sequence gap, or receiving an event that could not be hydrated.
-`message.deleted` includes the deleted IDs, and realtime message entries include
-`transactionID` when gomuks has one so optimistic sends can reconcile exactly.
+`message.deleted` includes the deleted IDs and, when locally available, hydrated
+message `entries` with the original content and `isDeleted: true`. Message list
+and search responses expose the same additive `isDeleted` field. A server that
+first receives an event after upstream redaction may not have its original
+content. Realtime message entries also include `transactionID` when gomuks has
+one so optimistic sends can reconcile exactly.
 
 Clients can send `{"type":"presence.set","active":false}` while they remain
 connected but are not the active/frontmost app. Inactive subscribers continue
