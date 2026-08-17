@@ -35,8 +35,6 @@ const (
 	wsEventQueueSize             = 512
 	wsSubscriptionsCommandType   = "subscriptions.set"
 	wsSubscriptionsUpdatedType   = "subscriptions.updated"
-	wsPresenceCommandType        = "presence.set"
-	wsPresenceUpdatedType        = "presence.updated"
 	wsReadyType                  = "ready"
 	wsDomainTypeChatUpserted     = "chat.upserted"
 	wsDomainTypeChatDeleted      = "chat.deleted"
@@ -70,12 +68,6 @@ type wsSubscriptionsUpdatedMessage struct {
 	ChatIDs   []string `json:"chatIDs"`
 }
 
-type wsPresenceUpdatedMessage struct {
-	Type      string `json:"type"`
-	RequestID string `json:"requestID,omitempty"`
-	Active    bool   `json:"active"`
-}
-
 type wsErrorMessage struct {
 	Type      string `json:"type"`
 	RequestID string `json:"requestID,omitempty"`
@@ -103,7 +95,6 @@ type wsDomainEvent struct {
 type wsClientState struct {
 	seq     int
 	chatIDs []string
-	active  bool
 	writeMu sync.Mutex
 }
 
@@ -236,10 +227,8 @@ func (h *wsHub) register(send realtimeSender, ping realtimePinger, close realtim
 	h.nextClientID++
 	id := h.nextClientID
 	h.clients[id] = &wsClient{
-		id: id,
-		// Preserve the original behavior for clients that predate presence.set:
-		// a subscribed connection is assumed active until it says otherwise.
-		state: &wsClientState{chatIDs: []string{}, active: true},
+		id:    id,
+		state: &wsClientState{chatIDs: []string{}},
 		send:  send,
 		ping:  ping,
 		close: close,
@@ -292,21 +281,17 @@ func (h *wsHub) setSubscriptions(id uint64, chatIDs []string) {
 	h.mu.Unlock()
 }
 
-func (h *wsHub) setPresence(id uint64, active bool) {
-	h.mu.Lock()
-	if client, ok := h.clients[id]; ok && client.state != nil {
-		client.state.active = active
-	}
-	h.mu.Unlock()
-}
-
 func (h *wsHub) processSyncComplete(syncComplete *jsoncmd.SyncComplete) {
 	domainEvents := mapSyncCompleteToDomainEvents(syncComplete)
 	for _, domainEvent := range domainEvents {
-		targets, hasActiveSubscriber := h.subscribedTargets(domainEvent.ChatID)
-		wantsPush := domainEvent.Type == wsDomainTypeMessageUpserted &&
-			!hasActiveSubscriber &&
-			h.server.push.canSend()
+		targets := h.subscribedTargets(domainEvent.ChatID)
+		// Push unconditionally for new messages. A WebSocket subscription says
+		// "some client has this chat open", not "every registered device does",
+		// so suppressing on it used to silence the phone in your pocket
+		// whenever the Mac had the same chat on screen. Clients decide for
+		// themselves whether to surface an arriving push (see
+		// NotificationService.willPresent).
+		wantsPush := domainEvent.Type == wsDomainTypeMessageUpserted && h.server.push.canSend()
 		if wantsPush && !h.server.chatAllowsPush(context.Background(), domainEvent.ChatID) {
 			wantsPush = false
 		}
@@ -464,22 +449,20 @@ func pushAvatarURL(room *database.Room, participants []compat.User, entry compat
 	return ""
 }
 
-func (h *wsHub) subscribedTargets(chatID string) ([]*wsClient, bool) {
+func (h *wsHub) subscribedTargets(chatID string) []*wsClient {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	output := make([]*wsClient, 0, len(h.clients))
-	hasActiveSubscriber := false
 	for _, client := range h.clients {
 		if client == nil || client.state == nil {
 			continue
 		}
 		if isWSSubscribed(client.state.chatIDs, chatID) {
 			output = append(output, client)
-			hasActiveSubscriber = hasActiveSubscriber || client.state.active
 		}
 	}
-	return output, hasActiveSubscriber
+	return output
 }
 
 func (h *wsHub) dropDuplicate(domainEvent wsDomainEvent, entries []compatRecord, now time.Time) bool {
@@ -746,7 +729,7 @@ func (h *wsHub) processRawPayload(clientID uint64, rawPayload []byte) error {
 		})
 		return nil
 	}
-	if msgType != wsSubscriptionsCommandType && msgType != wsPresenceCommandType {
+	if msgType != wsSubscriptionsCommandType {
 		h.write(client, wsErrorMessage{
 			Type:      wsErrorType,
 			RequestID: requestID,
@@ -754,10 +737,6 @@ func (h *wsHub) processRawPayload(clientID uint64, rawPayload []byte) error {
 			Message:   "Unsupported command type: " + msgType,
 		})
 		return nil
-	}
-
-	if msgType == wsPresenceCommandType {
-		return h.processPresencePayload(clientID, client, requestID, payloadObject)
 	}
 
 	for key := range payloadObject {
@@ -809,55 +788,6 @@ func (h *wsHub) processRawPayload(clientID uint64, rawPayload []byte) error {
 		Type:      wsSubscriptionsUpdatedType,
 		RequestID: requestID,
 		ChatIDs:   normalized,
-	})
-	return nil
-}
-
-func (h *wsHub) processPresencePayload(
-	clientID uint64,
-	client *wsClient,
-	requestID string,
-	payloadObject map[string]any,
-) error {
-	for key := range payloadObject {
-		if key != "type" && key != "requestID" && key != "active" {
-			h.write(client, wsErrorMessage{
-				Type:      wsErrorType,
-				RequestID: requestID,
-				Code:      wsErrorCodeInvalidPayload,
-				Message:   "Invalid presence payload",
-			})
-			return nil
-		}
-	}
-	if rawRequestID, ok := payloadObject["requestID"]; ok {
-		if _, castOK := rawRequestID.(string); !castOK {
-			h.write(client, wsErrorMessage{
-				Type:      wsErrorType,
-				RequestID: requestID,
-				Code:      wsErrorCodeInvalidPayload,
-				Message:   "requestID must be a string",
-			})
-			return nil
-		}
-	}
-
-	active, ok := payloadObject["active"].(bool)
-	if !ok {
-		h.write(client, wsErrorMessage{
-			Type:      wsErrorType,
-			RequestID: requestID,
-			Code:      wsErrorCodeInvalidPayload,
-			Message:   "active must be a boolean",
-		})
-		return nil
-	}
-
-	h.setPresence(clientID, active)
-	h.write(client, wsPresenceUpdatedMessage{
-		Type:      wsPresenceUpdatedType,
-		RequestID: requestID,
-		Active:    active,
 	})
 	return nil
 }
