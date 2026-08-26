@@ -47,3 +47,21 @@ func TestLoadUsesManageSecret(t *testing.T) {
 		t.Fatalf("ManageSecret = %q, want %q", got, want)
 	}
 }
+
+func TestLoadUsesEphemeralRootAndInlineAPNSKey(t *testing.T) {
+	t.Setenv("GOMUKS_ROOT", "")
+	t.Setenv("RAILWAY_VOLUME_MOUNT_PATH", "")
+	t.Setenv("EASYMATRIX_EPHEMERAL_ROOT", "/tmp/easymatrix-test")
+	t.Setenv("APNS_KEY", "private-key")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got, want := cfg.EphemeralDir, "/tmp/easymatrix-test"; got != want {
+		t.Fatalf("EphemeralDir = %q, want %q", got, want)
+	}
+	if got, want := cfg.APNSKey, "private-key"; got != want {
+		t.Fatalf("APNSKey = %q, want %q", got, want)
+	}
+}

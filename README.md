@@ -66,6 +66,7 @@ Once running:
 - `MATRIX_PASSWORD`: password for password login
 - `MATRIX_RECOVERY_KEY`: recovery key / passphrase for verification
 - `APNS_KEY_PATH`: path to an APNs `.p8` provider key (optional; enables push delivery)
+- `APNS_KEY`: the APNs `.p8` PEM contents supplied directly as a secret; accepts real or escaped newlines and takes precedence over `APNS_KEY_PATH`
 - `APNS_KEY_ID`: Apple push key identifier
 - `APNS_TEAM_ID`: Apple Developer team identifier
 - `APNS_TOPIC`: the app bundle ID, for example `com.SilverMarcs.SwiftBeeper`
@@ -84,10 +85,16 @@ silent, as are outgoing, reaction, membership, duplicate, and stale events.
 gomuks-compatible overrides:
 
 - `GOMUKS_ROOT`: use a specific gomuks root with `config/`, `data/`, `cache/`, and `logs/`
+- `EASYMATRIX_EPHEMERAL_ROOT`: put downloaded/decrypted assets, upload staging, gomuks cache, temporary files, and logs in a disposable directory. The Railway image defaults to `/tmp/easymatrix`.
 - `GOMUKS_CONFIG_HOME`
 - `GOMUKS_DATA_HOME`
 - `GOMUKS_CACHE_HOME`
 - `GOMUKS_LOGS_HOME`
+
+When `GOMUKS_ROOT` and `EASYMATRIX_EPHEMERAL_ROOT` are both set, only
+`config/` and `data/` are kept under the gomuks root. Cache and logs are moved
+to the ephemeral root. Completed API uploads are deleted after the Matrix
+message is sent successfully.
 
 Railway volume integration:
 

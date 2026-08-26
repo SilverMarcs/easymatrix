@@ -2,6 +2,7 @@ package gomuksruntime
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -38,6 +39,34 @@ func TestNewUsesExplicitStateDirAsGomuksRoot(t *testing.T) {
 	want := filepath.Join(root, "data")
 	if got := rt.StateDir(); got != want {
 		t.Fatalf("unexpected state dir: got %q want %q", got, want)
+	}
+}
+
+func TestNewKeepsCacheAndLogsInEphemeralDir(t *testing.T) {
+	root := t.TempDir()
+	ephemeralRoot := t.TempDir()
+
+	rt, err := New(config.Config{StateDir: root, EphemeralDir: ephemeralRoot})
+	if err != nil {
+		t.Fatalf("failed to create runtime: %v", err)
+	}
+
+	if got, want := rt.StateDir(), filepath.Join(root, "data"); got != want {
+		t.Fatalf("unexpected state dir: got %q want %q", got, want)
+	}
+	for _, path := range []string{
+		filepath.Join(root, "config"),
+		filepath.Join(root, "data"),
+		filepath.Join(ephemeralRoot, "gomuks-cache"),
+		filepath.Join(ephemeralRoot, "logs"),
+		filepath.Join(ephemeralRoot, "tmp"),
+	} {
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("expected %q to exist: %v", path, statErr)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "cache")); !os.IsNotExist(statErr) {
+		t.Fatalf("persistent cache directory should not be created, got %v", statErr)
 	}
 }
 

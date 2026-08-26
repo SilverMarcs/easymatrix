@@ -37,36 +37,75 @@ func New(cfg config.Config) (*Runtime, error) {
 		}
 		cfg.StateDir = stateDir
 	}
-	dataDir, err := resolveDataDir(cfg.StateDir)
+	if cfg.EphemeralDir != "" {
+		ephemeralDir, err := filepath.Abs(cfg.EphemeralDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve ephemeral dir: %w", err)
+		}
+		cfg.EphemeralDir = ephemeralDir
+	}
+	dataDir, err := resolveDataDir(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &Runtime{cfg: cfg, dataDir: dataDir}, nil
 }
 
-func withConfiguredGomuksRoot(root string, fn func() error) error {
-	if root == "" {
+func withConfiguredGomuksDirs(cfg config.Config, fn func() error) error {
+	if cfg.StateDir == "" {
 		return fn()
 	}
 
-	oldRoot, hadRoot := os.LookupEnv("GOMUKS_ROOT")
-	if err := os.Setenv("GOMUKS_ROOT", root); err != nil {
-		return fmt.Errorf("failed to set GOMUKS_ROOT: %w", err)
+	cacheDir := filepath.Join(cfg.StateDir, "cache")
+	logDir := filepath.Join(cfg.StateDir, "logs")
+	tempDir := filepath.Join(cacheDir, "tmp")
+	if cfg.EphemeralDir != "" {
+		cacheDir = filepath.Join(cfg.EphemeralDir, "gomuks-cache")
+		logDir = filepath.Join(cfg.EphemeralDir, "logs")
+		tempDir = filepath.Join(cfg.EphemeralDir, "tmp")
 	}
+	overrides := map[string]string{
+		"GOMUKS_ROOT":        "",
+		"GOMUKS_CONFIG_HOME": filepath.Join(cfg.StateDir, "config"),
+		"GOMUKS_DATA_HOME":   filepath.Join(cfg.StateDir, "data"),
+		"GOMUKS_CACHE_HOME":  cacheDir,
+		"GOMUKS_LOGS_HOME":   logDir,
+		"GOMUKS_TMPDIR":      tempDir,
+	}
+	type previousValue struct {
+		value string
+		set   bool
+	}
+	previous := make(map[string]previousValue, len(overrides))
 	defer func() {
-		if hadRoot {
-			_ = os.Setenv("GOMUKS_ROOT", oldRoot)
-		} else {
-			_ = os.Unsetenv("GOMUKS_ROOT")
+		for key, oldValue := range previous {
+			if oldValue.set {
+				_ = os.Setenv(key, oldValue.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
 		}
 	}()
+	for key, value := range overrides {
+		oldValue, wasSet := os.LookupEnv(key)
+		previous[key] = previousValue{value: oldValue, set: wasSet}
+		var err error
+		if value == "" {
+			err = os.Unsetenv(key)
+		} else {
+			err = os.Setenv(key, value)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to configure %s: %w", key, err)
+		}
+	}
 
 	return fn()
 }
 
-func resolveDataDir(root string) (string, error) {
+func resolveDataDir(cfg config.Config) (string, error) {
 	gmx := gomuks.NewGomuks()
-	if err := withConfiguredGomuksRoot(root, func() error {
+	if err := withConfiguredGomuksDirs(cfg, func() error {
 		gmx.InitDirectories()
 		return nil
 	}); err != nil {
@@ -131,7 +170,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	gmx := gomuks.NewGomuks()
 	gmx.DisableAuth = true
 
-	if err := withConfiguredGomuksRoot(r.cfg.StateDir, func() error {
+	if err := withConfiguredGomuksDirs(r.cfg, func() error {
 		gmx.InitDirectories()
 		dataDir, err := filepath.Abs(gmx.DataDir)
 		if err != nil {
@@ -145,7 +184,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		for i := range gmx.Config.Logging.Writers {
 			writer := &gmx.Config.Logging.Writers[i]
 			if string(writer.Type) == "file" {
-				writer.Filename = filepath.Join(r.cfg.StateDir, "logs", "gomuks.log")
+				writer.Filename = filepath.Join(gmx.LogDir, "gomuks.log")
 			}
 		}
 		gmx.SetupLog()

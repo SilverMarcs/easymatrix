@@ -337,16 +337,22 @@ type apnsProvider struct {
 }
 
 func newAPNSProvider(cfg config.Config) (*apnsProvider, error) {
-	if cfg.APNSKeyPath == "" || cfg.APNSKeyID == "" || cfg.APNSTeamID == "" || cfg.APNSTopic == "" {
-		return nil, fmt.Errorf("set APNS_KEY_PATH, APNS_KEY_ID, APNS_TEAM_ID, and APNS_TOPIC")
+	if (cfg.APNSKey == "" && cfg.APNSKeyPath == "") || cfg.APNSKeyID == "" || cfg.APNSTeamID == "" || cfg.APNSTopic == "" {
+		return nil, fmt.Errorf("set APNS_KEY or APNS_KEY_PATH, plus APNS_KEY_ID, APNS_TEAM_ID, and APNS_TOPIC")
 	}
-	raw, err := os.ReadFile(cfg.APNSKeyPath)
-	if err != nil {
-		return nil, err
+	var raw []byte
+	if cfg.APNSKey != "" {
+		raw = []byte(strings.ReplaceAll(cfg.APNSKey, `\n`, "\n"))
+	} else {
+		var err error
+		raw, err = os.ReadFile(cfg.APNSKeyPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	block, _ := pem.Decode(raw)
 	if block == nil {
-		return nil, fmt.Errorf("APNS_KEY_PATH does not contain a PEM private key")
+		return nil, fmt.Errorf("APNS_KEY or APNS_KEY_PATH does not contain a PEM private key")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {

@@ -16,6 +16,7 @@ type Config struct {
 	ListenAddr          string
 	AccessToken         string
 	StateDir            string
+	EphemeralDir        string
 	AllowQueryTokenAuth bool
 	ManageSecret        string
 	MatrixHomeserverURL string
@@ -24,6 +25,7 @@ type Config struct {
 	MatrixPassword      string
 	MatrixRecoveryKey   string
 	APNSKeyPath         string
+	APNSKey             string
 	APNSKeyID           string
 	APNSTeamID          string
 	APNSTopic           string
@@ -51,6 +53,7 @@ func Load() (Config, error) {
 		MatrixPassword:      os.Getenv("MATRIX_PASSWORD"),
 		MatrixRecoveryKey:   os.Getenv("MATRIX_RECOVERY_KEY"),
 		APNSKeyPath:         strings.TrimSpace(os.Getenv("APNS_KEY_PATH")),
+		APNSKey:             strings.TrimSpace(os.Getenv("APNS_KEY")),
 		APNSKeyID:           strings.TrimSpace(os.Getenv("APNS_KEY_ID")),
 		APNSTeamID:          strings.TrimSpace(os.Getenv("APNS_TEAM_ID")),
 		APNSTopic:           strings.TrimSpace(os.Getenv("APNS_TOPIC")),
@@ -63,6 +66,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("MATRIX_LOGIN_TOKEN cannot be combined with MATRIX_USERNAME/MATRIX_PASSWORD")
 	}
 	cfg.StateDir = resolveStateDir()
+	cfg.EphemeralDir = strings.TrimSpace(os.Getenv("EASYMATRIX_EPHEMERAL_ROOT"))
 	return cfg, nil
 }
 

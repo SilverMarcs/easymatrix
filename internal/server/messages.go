@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -192,6 +193,11 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	dbEvent, err := cli.SendMessage(r.Context(), roomID, base, nil, text, relatesTo, nil, nil)
 	if err != nil {
 		return errs.Internal(fmt.Errorf("failed to send message: %w", err))
+	}
+	if hasAttachment {
+		if cleanupErr := s.removeUpload(req.Attachment.UploadID); cleanupErr != nil {
+			log.Printf("failed to remove completed upload %s: %v", req.Attachment.UploadID, cleanupErr)
+		}
 	}
 	pendingMessageID := dbEvent.TransactionID
 	if pendingMessageID == "" {

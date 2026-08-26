@@ -33,7 +33,8 @@ WORKDIR /data
 
 COPY --from=build /out/easymatrix /usr/local/bin/easymatrix
 
-ENV GOMUKS_ROOT=/data/gomuks
+ENV GOMUKS_ROOT=/data/gomuks \
+	EASYMATRIX_EPHEMERAL_ROOT=/tmp/easymatrix
 
 USER easymatrix:easymatrix
 

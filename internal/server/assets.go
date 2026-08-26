@@ -362,11 +362,25 @@ func fileURLFromPath(path string) string {
 }
 
 func (s *Server) uploadRootDir() string {
-	return filepath.Join(s.rt.StateDir(), "api-uploads")
+	return filepath.Join(s.ephemeralRootDir(), "api-uploads")
 }
 
 func (s *Server) assetCacheDir() string {
-	return filepath.Join(s.rt.StateDir(), "assets")
+	return filepath.Join(s.ephemeralRootDir(), "assets")
+}
+
+func (s *Server) ephemeralRootDir() string {
+	if s.cfg.EphemeralDir != "" {
+		return s.cfg.EphemeralDir
+	}
+	return s.rt.StateDir()
+}
+
+func (s *Server) removeUpload(uploadID string) error {
+	if !safeUploadIDPattern.MatchString(uploadID) {
+		return fmt.Errorf("invalid upload ID")
+	}
+	return os.RemoveAll(filepath.Join(s.uploadRootDir(), uploadID))
 }
 
 func (s *Server) isAllowedServePath(path string) bool {
