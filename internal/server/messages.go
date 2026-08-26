@@ -618,13 +618,34 @@ func applyStoredMessageContent(message *compat.Message, evt *database.Event, evt
 	if err := json.Unmarshal(evt.GetContent(), &content); err != nil {
 		return err
 	}
+	// Matrix replies and bridged per-message profiles may include compatibility
+	// fallback text in Body. Relay renders those structures separately, so
+	// forwarding the fallback duplicates quoted text and any URLs it contains.
+	content.RemoveReplyFallback()
+	content.RemovePerMessageProfileFallback()
+
 	message.Type = mapMessageType(evtType, content.MsgType)
-	message.Text = content.Body
-	if message.Text == "" && evt.LocalContent != nil {
-		message.Text = evt.LocalContent.SanitizedHTML
+	if content.Mentions != nil {
+		message.Mentions = make([]string, 0, len(content.Mentions.UserIDs)+1)
+		for _, userID := range content.Mentions.UserIDs {
+			if userID != "" {
+				message.Mentions = append(message.Mentions, string(userID))
+			}
+		}
+		if content.Mentions.Room {
+			message.Mentions = append(message.Mentions, "@room")
+		}
 	}
 	if attachment, ok := messageAttachment(content, evtType); ok {
 		message.Attachments = []compat.Attachment{attachment}
+		// Matrix requires a Body for media and commonly fills it with the
+		// filename. GetCaption returns only actual authored caption text.
+		message.Text = content.GetCaption()
+	} else {
+		message.Text = content.Body
+		if message.Text == "" && evt.LocalContent != nil {
+			message.Text = evt.LocalContent.SanitizedHTML
+		}
 	}
 	return nil
 }
