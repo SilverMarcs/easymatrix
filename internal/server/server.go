@@ -29,8 +29,9 @@ type Server struct {
 	oauthSubject string
 	oauthState   string
 
-	ws   *wsHub
-	push *pushService
+	ws              *wsHub
+	push            *pushService
+	pushPrivacyTest *pushPrivacyTestService
 }
 
 type apiHandler func(http.ResponseWriter, *http.Request) error
@@ -56,6 +57,7 @@ func New(cfg config.Config, rt *gomuksruntime.Runtime) *Server {
 	s.auth.SetAssetTokenResolver(s.resolveAssetAccessToken)
 	s.ws = newWSHub(s)
 	s.push = newPushService(cfg, rt.StateDir())
+	s.pushPrivacyTest = newPushPrivacyTestService()
 	if s.push.canSend() {
 		if err := s.ws.ensureSubscription(); err != nil {
 			log.Printf("push event subscription will retry when realtime starts: %v", err)
@@ -82,6 +84,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /manage/beeper/start-login", s.manage(s.manageBeeperStartLogin))
 	mux.Handle("POST /manage/beeper/request-code", s.manage(s.manageBeeperRequestCode))
 	mux.Handle("POST /manage/beeper/submit-code", s.manage(s.manageBeeperSubmitCode))
+	mux.Handle("GET /manage/push-privacy-test", s.manage(s.getPushPrivacyTest))
+	mux.Handle("POST /manage/push-privacy-test", s.manage(s.registerPushPrivacyTest))
+	mux.Handle("DELETE /manage/push-privacy-test", s.manage(s.removePushPrivacyTest))
+	mux.Handle("POST /_matrix/push/v1/notify", s.public(s.receivePushPrivacyTest))
 	mux.Handle("GET /.well-known/oauth-protected-resource", s.public(s.oauthProtectedResourceMetadata))
 	mux.Handle("GET /.well-known/oauth-protected-resource/", s.public(s.oauthProtectedResourceMetadata))
 	mux.Handle("GET /.well-known/oauth-authorization-server", s.public(s.oauthAuthorizationServerMetadata))
